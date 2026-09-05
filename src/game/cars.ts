@@ -160,18 +160,18 @@ export class Car {
 
     // engine / brake
     let newFwd = fwdSpeed;
-    const maxSpeed = 24;
-    if (input.throttle > 0) newFwd += input.throttle * 18 * dt;
+    const maxSpeed = 12.5; // relaxed town-cruiser pace (~45 km/h)
+    if (input.throttle > 0) newFwd += input.throttle * 9.5 * dt;
     else if (input.throttle < 0) {
-      if (fwdSpeed > 0.5) newFwd += input.throttle * 26 * dt; // brake
-      else newFwd += input.throttle * 8 * dt; // reverse
+      if (fwdSpeed > 0.4) newFwd += input.throttle * 24 * dt; // brake
+      else newFwd += input.throttle * 5.5 * dt; // reverse
     } else {
-      newFwd *= 1 - Math.min(1, 1.6 * dt); // coast
+      newFwd *= 1 - Math.min(1, 2.2 * dt); // coast
     }
-    newFwd = THREE.MathUtils.clamp(newFwd, -8, maxSpeed);
+    newFwd = THREE.MathUtils.clamp(newFwd, -5, maxSpeed);
 
     // lateral grip (drifts a little)
-    const newSide = sideSpeed * (1 - Math.min(1, 6.5 * dt));
+    const newSide = sideSpeed * (1 - Math.min(1, 7.5 * dt));
 
     const outVel = new THREE.Vector3()
       .addScaledVector(this.tmpF, newFwd)
@@ -179,7 +179,7 @@ export class Car {
     this.body.setLinvel({ x: outVel.x, y: vel.y, z: outVel.z }, true);
 
     // steering scales with speed, flips when reversing
-    const steerAmt = input.steer * THREE.MathUtils.clamp(Math.abs(newFwd) / 6, 0, 1) * 1.9;
+    const steerAmt = input.steer * THREE.MathUtils.clamp(Math.abs(newFwd) / 5, 0, 1) * 1.5;
     this.body.setAngvel({ x: 0, y: -steerAmt * Math.sign(newFwd || 1), z: 0 }, true);
 
     this.speed = Math.abs(newFwd);
