@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import RAPIER from "@dimforge/rapier3d-compat";
+import { Rig, ROOT_GROUPS, RAY_IGNORE_LIMBS, type RigLook } from "./rig";
 
 export interface PlayerInput {
   moveX: number; // strafe  -1..1 (D positive)
@@ -7,24 +8,35 @@ export interface PlayerInput {
   sprint: boolean;
 }
 
+const PLAYER_LOOK: RigLook = {
+  jacket: "#d8452e",
+  pants: "#2e4a78",
+  skin: "#e8b48a",
+  hair: "#2f2620",
+  hat: null,
+  shoe: "#33302c",
+};
+
 /** Kinematic character controller + third-person camera anchored behind the player. */
 export class Player {
   body: RAPIER.RigidBody;
   collider: RAPIER.Collider;
   controller: RAPIER.KinematicCharacterController;
-  group = new THREE.Group();
+  rig: Rig;
 
-  yaw = Math.PI; // facing the shops (−z) at spawn
+  yaw = 0; // facing the shops (−z) at spawn
   pitch = 0.34;
+  private bodyYaw = 0;
   private vy = 0;
   private hVel = new THREE.Vector3();
   private grounded = false;
   private coyote = 0;
   private jumpBuffer = 0;
-  private bobPhase = 0;
   private camDist = 5.6;
   private camPos = new THREE.Vector3();
   private tmp = new THREE.Vector3();
+  private quat = new THREE.Quaternion();
+  private Y_AXIS = new THREE.Vector3(0, 1, 0);
   wasAirborne = false;
 
   onLand: (() => void) | null = null;
@@ -42,7 +54,10 @@ export class Player {
       RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(spawn.x, spawn.y, spawn.z)
     );
     this.collider = world.createCollider(
-      RAPIER.ColliderDesc.capsule(0.55, 0.38).setFriction(0).setRestitution(0),
+      RAPIER.ColliderDesc.capsule(0.55, 0.26)
+        .setFriction(0)
+        .setRestitution(0)
+        .setCollisionGroups(ROOT_GROUPS),
       this.body
     );
     this.controller = world.createCharacterController(0.02);
@@ -54,48 +69,10 @@ export class Player {
     this.controller.setApplyImpulsesToDynamicBodies(true);
     this.controller.setCharacterMass(72);
 
-    /* ------- little townie avatar ------- */
-    const jacket = new THREE.Mesh(
-      new THREE.CapsuleGeometry(0.36, 0.58, 6, 14),
-      new THREE.MeshStandardMaterial({ color: "#d8452e", roughness: 0.8 })
-    );
-    jacket.position.y = -0.08;
-    jacket.castShadow = true;
-    this.group.add(jacket);
-    const head = new THREE.Mesh(
-      new THREE.SphereGeometry(0.28, 18, 14),
-      new THREE.MeshStandardMaterial({ color: "#e8b48a", roughness: 0.75 })
-    );
-    head.position.y = 0.66;
-    head.castShadow = true;
-    this.group.add(head);
-    const cap = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.29, 0.31, 0.14, 14),
-      new THREE.MeshStandardMaterial({ color: "#f4c95d", roughness: 0.8 })
-    );
-    cap.position.y = 0.88;
-    cap.castShadow = true;
-    this.group.add(cap);
-    const brim = new THREE.Mesh(
-      new THREE.BoxGeometry(0.34, 0.05, 0.26),
-      new THREE.MeshStandardMaterial({ color: "#f4c95d", roughness: 0.8 })
-    );
-    brim.position.set(0, 0.84, 0.32);
-    this.group.add(brim);
-    const pack = new THREE.Mesh(
-      new THREE.BoxGeometry(0.42, 0.5, 0.22),
-      new THREE.MeshStandardMaterial({ color: "#2b5fa8", roughness: 0.85 })
-    );
-    pack.position.set(0, 0.02, -0.38);
-    pack.castShadow = true;
-    this.group.add(pack);
-    scene.add(this.group);
-    this.camPos
-      .copy(spawn)
-      .add(new THREE.Vector3(0, 1.35, 0))
-      .add(this.desiredCamPos(5.6));
-    this.camera.position.copy(this.camPos);
-    this.camera.lookAt(spawn.x, spawn.y + 1.35, spawn.z);
+    /* articulated body — limbs are real dynamic bodies on revolute joints */
+    this.rig = new Rig();
+    this.rig.build(this.body, world, scene, PLAYER_LOOK, true);
+    this.camPos.copy(this.desiredCamPos(99).add(new THREE.Vector3(spawn.x, spawn.y + 1.35, spawn.z)));
   }
 
   get pos() {
@@ -160,22 +137,26 @@ export class Player {
     this.wasAirborne = !nowGrounded;
     this.grounded = nowGrounded;
 
-    /* --- avatar presentation --- */
-    const np = this.body.translation();
     const planarSpeed = Math.hypot(moved.x, moved.z) / Math.max(dt, 1e-4);
-    if (planarSpeed > 0.6 && this.grounded) {
-      const targetYaw = Math.atan2(this.hVel.x, this.hVel.z);
-      let d = targetYaw - this.group.rotation.y;
+
+    /* --- face the travel direction; limbs' hinge axes follow this yaw --- */
+    if (planarSpeed > 0.6) {
+      const targetYaw = Math.atan2(-this.hVel.x, -this.hVel.z);
+      let d = targetYaw - this.bodyYaw;
       d = Math.atan2(Math.sin(d), Math.cos(d));
-      this.group.rotation.y += d * Math.min(1, 12 * dt);
-      this.bobPhase += dt * (6 + planarSpeed * 1.4);
+      this.bodyYaw += d * Math.min(1, 12 * dt);
       this.stepTimer -= dt;
-      if (this.stepTimer <= 0) {
+      if (this.grounded && this.stepTimer <= 0) {
         this.stepTimer = input.sprint ? 0.26 : 0.36;
         this.onStep?.();
       }
     }
-    this.group.position.set(np.x, np.y + Math.sin(this.bobPhase) * 0.035 - 0.02, np.z);
+    this.quat.setFromAxisAngle(this.Y_AXIS, this.bodyYaw);
+    this.body.setNextKinematicRotation({ x: this.quat.x, y: this.quat.y, z: this.quat.z, w: this.quat.w });
+
+    /* --- drive the articulated limbs with the gait motors --- */
+    this.rig.update(dt, this.grounded ? planarSpeed : Math.min(planarSpeed, 2.5));
+    this.rig.syncFrom(this.body);
   }
 
   updateCamera(dt: number) {
@@ -190,7 +171,7 @@ export class Player {
       { x: target.x, y: target.y, z: target.z },
       { x: dirN.x, y: dirN.y, z: dirN.z }
     );
-    const hit = this.world.castRay(ray, dist, true, undefined, undefined, undefined, this.body);
+    const hit = this.world.castRay(ray, dist, true, undefined, RAY_IGNORE_LIMBS, undefined, this.body);
     if (hit && hit.timeOfImpact < dist) dist = Math.max(1.5, hit.timeOfImpact - 0.35);
     this.camDist += (dist - this.camDist) * Math.min(1, 14 * dt);
 

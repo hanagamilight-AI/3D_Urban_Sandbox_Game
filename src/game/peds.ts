@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import RAPIER from "@dimforge/rapier3d-compat";
+import { Rig, ROOT_GROUPS, type RigLook } from "./rig";
 
 export const PED_NAMES = ["Sam", "Rio", "June", "Kofi", "Mara", "Nico", "Ada", "Bea", "Theo", "Lou", "Ivy", "Ozzy"];
 
@@ -20,28 +21,31 @@ export const DIALOGUE = [
   "I once raced a cloud around the block. It cheated.",
 ];
 
-const SHIRT_COLORS = ["#4a90b8", "#c96f8e", "#5a8f5a", "#7d6aa8", "#e3b23c", "#3d8b8b", "#b8604a", "#5a6aa8"];
-const SKIN_COLORS = ["#e8b48a", "#c98e62", "#8a5c3c", "#f0c9a0", "#6e4a30"];
+const JACKETS = ["#4a7fb5", "#7a4fb5", "#b54f6a", "#4fb57a", "#b5844f", "#5b8c85", "#a5533f", "#3f6fa5"];
+const PANTS = ["#33415c", "#4a3b2f", "#2f4a3b", "#55524e", "#3c2f4a"];
+const SKINS = ["#e8b48a", "#c68e5f", "#8d5a3b", "#f0c8a0", "#a06a44"];
+const HAIRS = ["#2f2620", "#54402c", "#191714", "#7a6a52", "#8c4a2f"];
+const HATS: (string | null)[] = [null, null, "#d8452e", "#2b5fa8", "#e0b23e", "#3c3a35"];
 
 export interface Ped {
   body: RAPIER.RigidBody;
   collider: RAPIER.Collider;
-  group: THREE.Group;
+  rig: Rig;
   loop: THREE.Vector3[];
   nodeIdx: number;
   dir: 1 | -1;
   speed: number;
   pauseT: number;
   talkT: number;
-  phase: number;
+  yaw: number;
   name: string;
   accent: string;
 }
 
 export class PedManager {
   peds: Ped[] = [];
-  private tmp = new THREE.Vector3();
-  private look = new THREE.Vector3();
+  private quat = new THREE.Quaternion();
+  private Y_AXIS = new THREE.Vector3(0, 1, 0);
 
   constructor(
     private scene: THREE.Scene,
@@ -59,53 +63,44 @@ export class PedManager {
 
       const body = this.world.createRigidBody(
         RAPIER.RigidBodyDesc.dynamic()
-          .setTranslation(pos.x, 1.0, pos.z)
+          .setTranslation(pos.x, 2.4, pos.z)
           .enabledRotations(false, false, false)
           .setLinearDamping(0.4)
+          .setCanSleep(false)
       );
       const collider = this.world.createCollider(
-        RAPIER.ColliderDesc.capsule(0.5, 0.34).setFriction(0.4).setDensity(1.4),
+        RAPIER.ColliderDesc.capsule(0.55, 0.26)
+          .setFriction(0.4)
+          .setDensity(25)
+          .setCollisionGroups(ROOT_GROUPS),
         body
       );
 
-      const shirt = SHIRT_COLORS[i % SHIRT_COLORS.length];
-      const group = new THREE.Group();
-      const torso = new THREE.Mesh(
-        new THREE.CapsuleGeometry(0.32, 0.5, 5, 12),
-        new THREE.MeshStandardMaterial({ color: shirt, roughness: 0.85 })
-      );
-      torso.position.y = -0.05;
-      torso.castShadow = true;
-      group.add(torso);
-      const head = new THREE.Mesh(
-        new THREE.SphereGeometry(0.25, 14, 12),
-        new THREE.MeshStandardMaterial({ color: SKIN_COLORS[i % SKIN_COLORS.length], roughness: 0.75 })
-      );
-      head.position.y = 0.58;
-      head.castShadow = true;
-      group.add(head);
-      // little beanie hat so every local has some personality
-      const hat = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.2, 0.26, 0.16, 12),
-        new THREE.MeshStandardMaterial({ color: SHIRT_COLORS[(i + 3) % SHIRT_COLORS.length], roughness: 0.9 })
-      );
-      hat.position.y = 0.76;
-      group.add(hat);
-      this.scene.add(group);
+      const jacket = JACKETS[i % JACKETS.length];
+      const look: RigLook = {
+        jacket,
+        pants: PANTS[(i * 2 + 1) % PANTS.length],
+        skin: SKINS[(i * 3 + 2) % SKINS.length],
+        hair: HAIRS[(i * 2 + 3) % HAIRS.length],
+        hat: HATS[(i * 5 + 1) % HATS.length],
+        shoe: "#2e2b28",
+      };
+      const rig = new Rig();
+      rig.build(body, this.world, this.scene, look);
 
       this.peds.push({
         body,
         collider,
-        group,
+        rig,
         loop,
         nodeIdx,
         dir: Math.random() > 0.5 ? 1 : -1,
         speed: 1.3 + Math.random() * 0.9,
         pauseT: 0,
         talkT: 0,
-        phase: Math.random() * 10,
+        yaw: 0,
         name: PED_NAMES[i % PED_NAMES.length],
-        accent: shirt,
+        accent: jacket,
       });
     }
   }
@@ -133,16 +128,17 @@ export class PedManager {
   update(dt: number, playerPos: THREE.Vector3) {
     for (const p of this.peds) {
       const t = p.body.translation();
-      p.phase += dt * p.speed * 4.2;
+      let moveSpeed = 0;
 
       if (p.pauseT > 0) {
         p.pauseT -= dt;
         if (p.talkT > 0) {
           p.talkT -= dt;
-          const want = Math.atan2(playerPos.x - t.x, playerPos.z - t.z);
-          let d = want - p.group.rotation.y;
+          // turn to face the player (character forward is local −Z)
+          const want = Math.atan2(-(playerPos.x - t.x), -(playerPos.z - t.z));
+          let d = want - p.yaw;
           d = Math.atan2(Math.sin(d), Math.cos(d));
-          p.group.rotation.y += d * Math.min(1, 10 * dt);
+          p.yaw += d * Math.min(1, 10 * dt);
         }
         p.body.setLinvel({ x: 0, y: p.body.linvel().y, z: 0 }, true);
       } else {
@@ -159,14 +155,20 @@ export class PedManager {
         } else {
           const s = p.speed / dist;
           p.body.setLinvel({ x: dx * s, y: p.body.linvel().y, z: dz * s }, true);
-          const want = Math.atan2(dx, dz);
-          let d = want - p.group.rotation.y;
+          moveSpeed = p.speed;
+          const want = Math.atan2(-dx, -dz);
+          let d = want - p.yaw;
           d = Math.atan2(Math.sin(d), Math.cos(d));
-          p.group.rotation.y += d * Math.min(1, 8 * dt);
+          p.yaw += d * Math.min(1, 8 * dt);
         }
       }
 
-      p.group.position.set(t.x, t.y + Math.sin(p.phase) * 0.03 - 0.02, t.z);
+      // the physics body carries the yaw so limb hinge axes track facing
+      this.quat.setFromAxisAngle(this.Y_AXIS, p.yaw);
+      p.body.setRotation({ x: this.quat.x, y: this.quat.y, z: this.quat.z, w: this.quat.w }, true);
+
+      p.rig.update(dt, moveSpeed);
+      p.rig.syncFrom(p.body);
     }
   }
 }
