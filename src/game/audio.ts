@@ -64,6 +64,23 @@ class Sfx {
   denied() {
     this.tone(200, 0.12, "sawtooth", 0.05, 120);
   }
+  shoot() {
+    // snappy two-layer gunshot: low thump + high crack
+    this.tone(150, 0.09, "square", 0.14, 60);
+    this.tone(1300, 0.05, "sawtooth", 0.07, 400);
+    this.tone(2600, 0.03, "square", 0.04, 900, 0.01);
+  }
+  hurt() {
+    this.tone(220, 0.16, "sawtooth", 0.1, 90);
+  }
+  siren() {
+    // quick two-note police yelp
+    this.tone(720, 0.18, "triangle", 0.08, 980);
+    this.tone(980, 0.18, "triangle", 0.08, 720, 0.19);
+  }
+  engine() {
+    this.tone(70, 0.12, "sawtooth", 0.04, 110);
+  }
 }
 
 export const sfx = new Sfx();

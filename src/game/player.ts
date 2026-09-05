@@ -43,6 +43,11 @@ export class Player {
   onJump: (() => void) | null = null;
   onStep: (() => void) | null = null;
   private stepTimer = 0;
+  private muzzle!: THREE.Mesh;
+  private muzzleT = 0;
+  private recoil = 0;
+  private fireCooldown = 0;
+  fireRate = 0.22; // seconds between shots
 
   constructor(
     private scene: THREE.Scene,
@@ -72,7 +77,41 @@ export class Player {
     /* articulated body — limbs are real dynamic bodies on revolute joints */
     this.rig = new Rig();
     this.rig.build(this.body, world, scene, PLAYER_LOOK, true);
+    this.buildGun();
     this.camPos.copy(this.desiredCamPos(99).add(new THREE.Vector3(spawn.x, spawn.y + 1.35, spawn.z)));
+  }
+
+  private buildGun() {
+    const g = this.rig.gunAnchor;
+    const metal = new THREE.MeshStandardMaterial({ color: "#2b2d33", roughness: 0.4, metalness: 0.7 });
+    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.22, 0.12), metal);
+    grip.position.set(0, -0.14, 0.05);
+    g.add(grip);
+    const slide = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.1, 0.42), metal);
+    slide.position.set(0, 0.02, -0.12);
+    g.add(slide);
+    const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.14), metal);
+    barrel.position.set(0, 0.02, -0.4);
+    g.add(barrel);
+    this.muzzle = new THREE.Mesh(
+      new THREE.SphereGeometry(0.1, 8, 6),
+      new THREE.MeshBasicMaterial({ color: "#ffd27a", transparent: true, opacity: 0 })
+    );
+    this.muzzle.position.set(0, 0.02, -0.52);
+    g.add(this.muzzle);
+  }
+
+  /** returns true if a shot was actually fired */
+  tryFire(): boolean {
+    if (this.fireCooldown > 0) return false;
+    this.fireCooldown = this.fireRate;
+    this.muzzleT = 0.07;
+    this.recoil = 1;
+    return true;
+  }
+
+  setVisible(v: boolean) {
+    this.rig.setVisible(v);
   }
 
   get pos() {
@@ -157,6 +196,15 @@ export class Player {
     /* --- drive the articulated limbs with the gait motors --- */
     this.rig.update(dt, this.grounded ? planarSpeed : Math.min(planarSpeed, 2.5));
     this.rig.syncFrom(this.body);
+
+    /* --- gun feedback --- */
+    this.fireCooldown = Math.max(0, this.fireCooldown - dt);
+    this.muzzleT = Math.max(0, this.muzzleT - dt);
+    (this.muzzle.material as THREE.MeshBasicMaterial).opacity = this.muzzleT / 0.07;
+    this.muzzle.scale.setScalar(0.8 + Math.random() * 0.5);
+    this.recoil = Math.max(0, this.recoil - dt * 6);
+    this.rig.gunAnchor.position.z = -0.28 + this.recoil * 0.1;
+    this.rig.gunAnchor.rotation.x = this.recoil * 0.35;
   }
 
   updateCamera(dt: number) {

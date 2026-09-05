@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Game, type SayInfo, type ZoneInfo } from "./game/engine";
+import { Game, type SayInfo, type ZoneInfo, type InteractKind } from "./game/engine";
 
 type Status = "loading" | "ready";
 
@@ -23,6 +23,31 @@ const IconChat = () => (
     <path d="M3 4h18v13h-9.5L6 21.5V17H3z" />
   </svg>
 );
+const IconCar = () => (
+  <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4 15l1.5-5h13L20 15M4 15h16v4h-2.5M4 15v4h2.5M6.5 19h11" />
+    <circle cx="7" cy="17" r="0.5" fill="currentColor" />
+    <circle cx="17" cy="17" r="0.5" fill="currentColor" />
+  </svg>
+);
+const IconGun = () => (
+  <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+    <path d="M2 8h20v3h-3l-1 3h-4l1-3H9v2H6l-1 6H2l1.5-6H2z" />
+  </svg>
+);
+const IconStar = ({ active }: { active: boolean }) => (
+  <svg
+    viewBox="0 0 24 24"
+    width="17"
+    height="17"
+    fill={active ? "#ffc42e" : "rgba(255,255,255,0.14)"}
+    stroke={active ? "#8a6a10" : "rgba(255,255,255,0.2)"}
+    strokeWidth="1.4"
+    className={active ? "drop-in" : ""}
+  >
+    <path d="M12 2.5l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4l-5.9 3.1 1.2-6.5L2.5 9.4l6.6-.9z" />
+  </svg>
+);
 const IconPause = () => (
   <svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor">
     <rect x="5" y="4" width="5" height="16" rx="1" />
@@ -44,11 +69,11 @@ const IconDrag = () => (
 /* ================= touch controls ================= */
 function TouchControls({
   active,
-  prompt,
+  promptKind,
   getGame,
 }: {
   active: boolean;
-  prompt: boolean;
+  promptKind: InteractKind;
   getGame: () => Game | null;
 }) {
   const joyBase = useRef<HTMLDivElement>(null);
@@ -170,21 +195,40 @@ function TouchControls({
         className="absolute right-4 flex flex-col items-end gap-3"
         style={{ bottom: "calc(1.5rem + env(safe-area-inset-bottom))" }}
       >
-        {prompt && (
+        {/* context action: talk / drive / exit */}
+        {promptKind && (
           <button
             className="rise-in pointer-events-auto flex h-12 items-center gap-2.5 rounded-full border-[3px] border-[#8a6a10] bg-[linear-gradient(180deg,#ffd257_0%,#ffc42e_55%,#eda912_100%)] px-5 text-[#17130a] shadow-[0_5px_0_rgba(0,0,0,0.35),0_10px_18px_rgba(0,0,0,0.3)] active:translate-y-0.5 active:shadow-[0_2px_0_rgba(0,0,0,0.35)]"
             style={{ touchAction: "none" }}
             onPointerDown={(e) => {
               e.preventDefault();
               e.stopPropagation();
-              getGame()?.talk();
+              getGame()?.action();
             }}
           >
-            <IconChat />
-            <span className="font-sign text-sm leading-none">TALK</span>
+            {promptKind === "drive" || promptKind === "exit" ? <IconCar /> : <IconChat />}
+            <span className="font-sign text-sm leading-none">
+              {promptKind === "drive" ? "DRIVE" : promptKind === "exit" ? "EXIT" : "TALK"}
+            </span>
             <span className="pulse-dot h-2 w-2 rounded-full bg-[#d8452e]" />
           </button>
         )}
+        {/* hold-to-fire */}
+        <button
+          className="pointer-events-auto flex h-16 w-16 flex-col items-center justify-center gap-0.5 rounded-full border-[3px] border-[#7a1d14] bg-[linear-gradient(180deg,#e86a5e_0%,#d8452e_55%,#a8301e_100%)] text-white shadow-[0_6px_0_rgba(0,0,0,0.35),0_12px_20px_rgba(0,0,0,0.35)] active:translate-y-1 active:shadow-[0_2px_0_rgba(0,0,0,0.35)]"
+          style={{ touchAction: "none" }}
+          onPointerDown={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            getGame()?.setFire(true);
+          }}
+          onPointerUp={() => getGame()?.setFire(false)}
+          onPointerLeave={() => getGame()?.setFire(false)}
+          onPointerCancel={() => getGame()?.setFire(false)}
+        >
+          <IconGun />
+          <span className="font-sign text-[10px] leading-none">FIRE</span>
+        </button>
         <div className="flex items-end gap-3">
           <button
             className={`pointer-events-auto flex h-14 w-14 flex-col items-center justify-center gap-0.5 rounded-full border-[3px] shadow-[0_5px_0_rgba(0,0,0,0.35),0_10px_18px_rgba(0,0,0,0.3)] transition-colors active:translate-y-0.5 active:shadow-[0_2px_0_rgba(0,0,0,0.35)] ${
@@ -238,7 +282,10 @@ export default function App() {
   const [locked, setLocked] = useState(false);
   const [visited, setVisited] = useState(false);
   const [zone, setZone] = useState<ZoneInfo | null>(null);
-  const [prompt, setPrompt] = useState(false);
+  const [promptKind, setPromptKind] = useState<InteractKind>(null);
+  const [health, setHealth] = useState(100);
+  const [wanted, setWanted] = useState(0);
+  const [toast, setToast] = useState<string | null>(null);
   const [say, setSay] = useState<SayInfo | null>(null);
   const [exiting, setExiting] = useState(false);
   const [clock, setClock] = useState("10:07 AM");
@@ -252,7 +299,10 @@ export default function App() {
         if (l) setVisited(true);
       },
       onZone: setZone,
-      onPrompt: setPrompt,
+      onPrompt: setPromptKind,
+      onHealth: setHealth,
+      onWanted: setWanted,
+      onToast: setToast,
       onSay: (info) => {
         sayRef.current = info;
         setSay(info);
@@ -350,6 +400,46 @@ export default function App() {
             </div>
           </div>
 
+          {/* vitals — wanted stars + health bar (top center) */}
+          {locked && (
+            <div className="absolute top-3 left-1/2 flex -translate-x-1/2 flex-col items-center gap-1.5 sm:top-4">
+              <div className="flex items-center gap-0.5">
+                {[0, 1, 2, 3, 4].map((i) => (
+                  <IconStar key={i} active={i < wanted} />
+                ))}
+              </div>
+              <div className="sign sign-dark flex items-center gap-2 px-3 py-1.5">
+                <span className="text-[9px] font-bold tracking-widest text-white/55">HP</span>
+                <div className="h-3 w-32 overflow-hidden rounded-full border border-white/15 bg-black/45 sm:w-44">
+                  <div
+                    className="h-full rounded-full transition-all duration-200"
+                    style={{
+                      width: `${health}%`,
+                      background:
+                        health > 50
+                          ? "linear-gradient(90deg,#2fa05f,#4fbf7d)"
+                          : health > 25
+                            ? "linear-gradient(90deg,#e3b23c,#ffc42e)"
+                            : "linear-gradient(90deg,#c0392b,#e86a5e)",
+                    }}
+                  />
+                </div>
+                <span className="w-7 text-right text-[10px] font-bold text-white/80">
+                  {Math.round(health)}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* toast — dispatch messages */}
+          {toast && locked && (
+            <div className={`absolute left-1/2 -translate-x-1/2 ${IS_TOUCH ? "top-28" : "top-24"}`}>
+              <div className="drop-in sign sign-yellow bolt px-5 pt-2.5 pb-2">
+                <span className="font-sign text-xs whitespace-nowrap">{toast}</span>
+              </div>
+            </div>
+          )}
+
           {/* crosshair */}
           {locked && !IS_TOUCH && (
             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
@@ -390,13 +480,15 @@ export default function App() {
           {/* talk prompt — bottom left (keyboard players only) */}
           {!IS_TOUCH && (
             <div className="absolute bottom-16 left-4">
-              {prompt && locked && (
+              {promptKind && locked && (
                 <div className="rise-in">
                   <div className="sign sign-yellow bolt flex items-center gap-3 px-5 pt-3 pb-2.5">
                     <span className="keycap !bg-[linear-gradient(180deg,#3a4250,#2a303b)] !text-white">
                       E
                     </span>
-                    <span className="font-sign text-sm">SAY HELLO</span>
+                    <span className="font-sign text-sm">
+                      {promptKind === "drive" ? "DRIVE CAR" : promptKind === "exit" ? "EXIT CAR" : "SAY HELLO"}
+                    </span>
                   </div>
                 </div>
               )}
@@ -422,8 +514,11 @@ export default function App() {
                     <span className="keycap keycap-wide ml-2">SHIFT</span> SPRINT
                   </span>
                   <span className="flex items-center gap-2">
-                    <span className="keycap">E</span> TALK
-                    <span className="keycap ml-2">ESC</span> PAUSE
+                    <span className="keycap">E</span> TALK / DRIVE
+                    <span className="keycap keycap-wide ml-2">CLICK</span> SHOOT
+                  </span>
+                  <span className="flex items-center gap-2">
+                    <span className="keycap ml-0.5">ESC</span> PAUSE
                   </span>
                 </div>
               </div>
@@ -460,7 +555,7 @@ export default function App() {
       {/* ============ touch controls (above the map, below the overlay) ============ */}
       <TouchControls
         active={showHud && locked}
-        prompt={prompt}
+        promptKind={promptKind}
         getGame={getGame}
       />
 
@@ -516,10 +611,11 @@ export default function App() {
               className="rise-in mt-12 max-w-md text-center text-sm leading-relaxed font-medium text-white/70"
               style={{ animationDelay: "0.12s" }}
             >
-              A pocket open world with real physics. Stroll the sidewalks, duck into the
-              <span className="text-[#4fbf7d]"> grocery</span>, the
-              <span className="text-[#e8b84b]"> clothing shop</span> and the
-              <span className="text-[#ff8a70]"> café</span> — and chat up the locals on your way past.
+              A pocket open world with real physics. Chat up locals, borrow a
+              <span className="text-[#9fc2ff]"> car</span>, cool off at the
+              <span className="text-[#6fc2e8]"> lake</span> — and if you start trouble with your
+              <span className="text-[#e86a5e]"> sidearm</span>, the precinct will come looking. Heal up at the
+              <span className="text-[#e86a5e]"> hospital</span>.
             </p>
 
             <button
@@ -555,7 +651,10 @@ export default function App() {
                   <span className="text-sunyellow"><IconJump /></span> BUTTONS · JUMP &amp; RUN
                 </span>
                 <span className="flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-4 py-2 text-[10px] font-bold tracking-[0.16em] text-white/65">
-                  <span className="text-sunyellow"><IconChat /></span> TALK · GREET LOCALS
+                  <span className="text-sunyellow"><IconGun /></span> HOLD FIRE · SHOOT
+                </span>
+                <span className="flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-4 py-2 text-[10px] font-bold tracking-[0.16em] text-white/65">
+                  <span className="text-sunyellow"><IconCar /></span> ACTION · TALK &amp; DRIVE
                 </span>
               </div>
             ) : (
@@ -579,7 +678,10 @@ export default function App() {
                   <span className="keycap keycap-wide">SHIFT</span> SPRINT
                 </span>
                 <span className="flex items-center gap-2">
-                  <span className="keycap">E</span> TALK TO LOCALS
+                  <span className="keycap">E</span> TALK / DRIVE
+                </span>
+                <span className="flex items-center gap-2">
+                  <span className="keycap keycap-wide">CLICK</span> SHOOT
                 </span>
                 <span className="flex items-center gap-2">
                   <span className="keycap">MOUSE</span> LOOK
@@ -591,7 +693,7 @@ export default function App() {
               className="rise-in mt-8 text-center text-[10px] font-semibold tracking-[0.25em] text-white/35"
               style={{ animationDelay: "0.3s" }}
             >
-              3 SHOPS OPEN · SIDEWALKS PATROLLED · GRAVITY −9.81
+              HOSPITAL · POLICE · MALL · LAKE &amp; BEACH · DRIVABLE CARS · GRAVITY −9.81
             </div>
           </div>
         </div>
