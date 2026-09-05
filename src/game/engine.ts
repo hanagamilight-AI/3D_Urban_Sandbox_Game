@@ -83,7 +83,18 @@ export class Game {
   private policeTimer = 0;
   private topUpTimer = 0;
   private health = MAX_HEALTH;
+  private needsRespawn = false;
   private toastTimer = 0;
+
+  /* ---- adaptive quality: back off pixel ratio / shadows when frames sag ---- */
+  private sun!: THREE.DirectionalLight;
+  private readonly maxPixelRatio = 1.75;
+  private readonly prSteps = [1.75, 1.5, 1.25, 1];
+  private prLevel = 0;
+  private frameAcc = 0;
+  private frameN = 0;
+  private slowStreak = 0;
+  private minimapTick = 0;
 
   constructor(
     private container: HTMLElement,
@@ -91,7 +102,7 @@ export class Game {
     private cb: GameCallbacks
   ) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.maxPixelRatio));
     this.renderer.setSize(container.clientWidth, container.clientHeight);
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -105,20 +116,24 @@ export class Game {
     this.scene.background = new THREE.Color("#a9d9ec");
     this.scene.fog = new THREE.Fog(new THREE.Color("#a9d9ec").getHex(), 120, 420);
 
-    const hemi = new THREE.HemisphereLight("#d8f0fa", "#5e8c4a", 0.95);
+    // Soft ambient fill replaces the expensive per-pixel PointLights, so interiors
+    // stay readable without any per-fragment point-light cost.
+    const hemi = new THREE.HemisphereLight("#d8f0fa", "#5e8c4a", 1.15);
     this.scene.add(hemi);
+    this.scene.add(new THREE.AmbientLight("#fff3e0", 0.55));
     const sun = new THREE.DirectionalLight("#fff1d6", 2.4);
     sun.position.set(60, 90, 40);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
-    sun.shadow.camera.left = -170;
-    sun.shadow.camera.right = 170;
-    sun.shadow.camera.top = 170;
-    sun.shadow.camera.bottom = -170;
+    sun.shadow.mapSize.set(1024, 1024);
+    sun.shadow.camera.left = -120;
+    sun.shadow.camera.right = 120;
+    sun.shadow.camera.top = 120;
+    sun.shadow.camera.bottom = -120;
     sun.shadow.camera.near = 5;
     sun.shadow.camera.far = 320;
     sun.shadow.bias = -0.0004;
     this.scene.add(sun);
+    this.sun = sun;
 
     window.addEventListener("resize", this.onResize);
     document.addEventListener("keydown", this.onKeyDown);
@@ -335,11 +350,14 @@ export class Game {
 
   /* ---------------- health ---------------- */
   private damagePlayer(d: number) {
-    if (this.health <= 0) return;
+    if (this.health <= 0 || this.needsRespawn) return;
     this.health = Math.max(0, this.health - d);
     sfx.hurt();
     this.cb.onHealth(this.health);
-    if (this.health <= 0) this.respawn();
+    // Don't respawn inline: we're inside peds.update() mid-iteration, and
+    // removing police bodies there corrupts the physics step. Defer it to the
+    // end of the frame instead.
+    if (this.health <= 0) this.needsRespawn = true;
   }
   private respawn() {
     this.health = MAX_HEALTH;
@@ -390,7 +408,8 @@ export class Game {
   private loop = (now: number) => {
     if (this.disposed) return;
     this.raf = requestAnimationFrame(this.loop);
-    const dt = Math.min(0.05, (now - this.lastT) / 1000);
+    const rawDt = (now - this.lastT) / 1000;
+    const dt = Math.min(0.05, rawDt);
     this.lastT = now;
 
     if (this.locked && this.ready) {
@@ -408,10 +427,41 @@ export class Game {
       if (this.inCar) this.updateCarCamera(dt);
       else this.player.updateCamera(this.locked ? dt : 0.0001);
       this.updateBubbleAndMarker();
-      this.drawMinimap();
+      // redraw the minimap every 3rd frame — it's a 2D canvas pass and
+      // doesn't need 60fps to read clearly
+      if (++this.minimapTick % 3 === 0) this.drawMinimap();
       this.renderer.render(this.scene, this.camera);
+      this.governQuality(rawDt);
     }
   };
+
+  /** Watch the average frame time and shed load before it turns into stutter. */
+  private governQuality(rawDt: number) {
+    this.frameAcc += rawDt;
+    this.frameN++;
+    if (this.frameN < 90) return; // evaluate once every ~90 frames
+    const avg = this.frameAcc / this.frameN;
+    this.frameAcc = 0;
+    this.frameN = 0;
+    if (avg > 0.024) {
+      this.slowStreak++;
+      if (this.slowStreak >= 2 && this.prLevel < this.prSteps.length) {
+        this.slowStreak = 0;
+        const next = Math.min(this.prLevel + 1, this.prSteps.length - 1);
+        if (next !== this.prLevel) {
+          this.prLevel = next;
+          this.renderer.setPixelRatio(
+            Math.min(window.devicePixelRatio, this.prSteps[this.prLevel])
+          );
+        } else {
+          // already at the floor on resolution — drop real-time shadows entirely
+          this.sun.castShadow = false;
+        }
+      }
+    } else if (avg < 0.013) {
+      this.slowStreak = 0;
+    }
+  }
 
   private simulate(dt: number) {
     this.simT += dt;
@@ -515,6 +565,12 @@ export class Game {
     this.updateZones(dt);
     this.updateInteraction();
     this.updateClock(dt);
+
+    /* ---- deferred respawn (safe point: physics step + ped iteration are done) ---- */
+    if (this.needsRespawn) {
+      this.needsRespawn = false;
+      this.respawn();
+    }
   }
 
   private updateZones(dt: number) {

@@ -388,9 +388,6 @@ export function buildCity(scene: THREE.Scene, world: RAPIER.World): CityHandles 
     }
     solid(scene, world, 3.2, 1.05, 1.1, "#8a8478", 31.4, 0.52, 17.6);
     solid(scene, world, 9.5, 2.3, 1.0, "#9fb4bd", 24, 1.15, 28.25);
-    const pl = new THREE.PointLight("#fff3d8", 26, 22, 1.6);
-    pl.position.set(26, 3.5, 22);
-    scene.add(pl);
     zoneSensor(26, 22.6, 8.2, 6.2, "FRESH MART", "Grocery Store · aisle 3 restocked", "#4fbf7d");
     mapBuildings.push({ x: 26, z: 22, w: 18, d: 14, color: "#4fbf7d", label: "FRESH MART" });
   }
@@ -408,9 +405,6 @@ export function buildCity(scene: THREE.Scene, world: RAPIER.World): CityHandles 
         mesh(scene, 0.34, 0.85, 0.16, railColors[(i + Math.abs(rx)) % 6], rx, 1.25, 22.6 + i * 0.95, { shadow: false });
     }
     solid(scene, world, 2.6, 0.85, 2.6, "#a58e6b", -26, 0.42, 17.8);
-    const pl = new THREE.PointLight("#ffe9c0", 22, 20, 1.6);
-    pl.position.set(-26, 3.5, 22);
-    scene.add(pl);
     zoneSensor(-26, 22.6, 6.2, 6.2, "THREAD & CO", "Clothing Shop · new fall rack in", "#e8b84b");
     mapBuildings.push({ x: -26, z: 22, w: 14, d: 14, color: "#e8b84b", label: "THREAD & CO" });
   }
@@ -429,9 +423,6 @@ export function buildCity(scene: THREE.Scene, world: RAPIER.World): CityHandles 
       top.castShadow = true;
       scene.add(top);
     }
-    const pl = new THREE.PointLight("#ffdca8", 24, 20, 1.6);
-    pl.position.set(24, 3.4, -20);
-    scene.add(pl);
     zoneSensor(24, -20.4, 5.8, 4.7, "CAFÉ LUNA", "Café · oat-milk flat whites today", "#ff8a70");
     mapBuildings.push({ x: 24, z: -20, w: 13, d: 11, color: "#ff8a70", label: "CAFÉ LUNA" });
   }
@@ -452,9 +443,7 @@ export function buildCity(scene: THREE.Scene, world: RAPIER.World): CityHandles 
       mesh(scene, 1.1, 0.14, 0.7, "#f2f5f8", bx, 0.66, -120.7, { shadow: false });
     }
     solid(scene, world, 1.2, 2.2, 8, "#dfe3e8", -14, 1.1, -118); // supply wall
-    const pl = new THREE.PointLight("#f4f8ff", 26, 26, 1.6);
-    pl.position.set(0, 3.5, -115);
-    scene.add(pl);
+
     // helipad on the roof
     const pad = new THREE.Mesh(new THREE.CylinderGeometry(4.5, 4.5, 0.12, 24), M("#3c4046"));
     pad.position.set(8, H + 0.4, -115);
@@ -477,9 +466,6 @@ export function buildCity(scene: THREE.Scene, world: RAPIER.World): CityHandles 
     solid(scene, world, 5, 1.0, 1.6, "#5a6a85", -112, 0.5, -5);
     solid(scene, world, 1.4, 2.6, 6, "#4a5871", -124, 1.3, 4); // cell block
     mesh(scene, 0.12, 2.2, 5.6, "#9fc2ff", -123.2, 1.3, 4, { shadow: false, rough: 0.2 }); // bars
-    const pl = new THREE.PointLight("#cfe0ff", 22, 22, 1.6);
-    pl.position.set(-115, 3.5, 0);
-    scene.add(pl);
     zoneSensor(-115, 0, 10, 8, "POLICE PRECINCT 5", "Law & order · don't cause trouble", "#7fa8e8");
     mapBuildings.push({ x: -115, z: 0, w: 24, d: 20, color: "#7fa8e8", label: "POLICE" });
   }
@@ -505,9 +491,6 @@ export function buildCity(scene: THREE.Scene, world: RAPIER.World): CityHandles 
     scene.add(awat);
     // escalator block
     solid(scene, world, 5, 2.2, 3, "#8f8877", 18, 1.1, 110);
-    const pl = new THREE.PointLight("#fff0d0", 28, 30, 1.6);
-    pl.position.set(0, 3.5, 115);
-    scene.add(pl);
     zoneSensor(0, 115, 19, 10, "SUNNYSIDE MALL", "Shopping · food court on level 2", "#d8b86a");
     mapBuildings.push({ x: 0, z: 115, w: 44, d: 26, color: "#d8b86a", label: "MALL" });
   }

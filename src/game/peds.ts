@@ -288,6 +288,11 @@ export class PedManager {
         }
       }
 
+      // The behavior above can trigger damage/respawn which may have removed this
+      // very body from the world (e.g. a police swipe that fells the player). If it
+      // happened, skip the rest — touching a removed body would read freed memory.
+      if (p.dead) continue;
+
       p.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
       this.quat.setFromAxisAngle(this.Y_AXIS, p.yaw);
       p.body.setRotation({ x: this.quat.x, y: this.quat.y, z: this.quat.z, w: this.quat.w }, true);
