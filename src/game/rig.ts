@@ -40,11 +40,45 @@ export interface RigLook {
   shoe: string;
 }
 
+/**
+ * Rapier builds revolute joints either as a UnitImpulseJoint (flat API:
+ * `setLimits(min, max)`) or as a GenericImpulseJoint (per-axis API:
+ * `setLimits(axis, min, max)`), depending on the factory used and the
+ * package version. This adapter detects the real signature once at build
+ * time and always forwards the right call shape — so gait motors drive the
+ * limbs no matter which wrapper the runtime returns.
+ */
 interface MotorJoint {
   setLimits(min: number, max: number): void;
   configureMotorModel(m: RAPIER.MotorModel): void;
   configureMotorPosition(target: number, stiffness: number, damping: number): void;
   setMotorMaxForce(f: number): void;
+}
+
+function wrapJoint(raw: unknown): MotorJoint {
+  const j = raw as {
+    setLimits: (...a: number[]) => void;
+    configureMotorModel: (...a: unknown[]) => void;
+    configureMotorPosition: (...a: number[]) => void;
+    setMotorMaxForce: (...a: number[]) => void;
+  };
+  // generic joints take (axis, ...) — 4 params for configureMotorPosition
+  const generic = j.configureMotorPosition.length >= 4;
+  const AX = (RAPIER.JointAxis?.AngX ?? 3) as number;
+  if (generic) {
+    return {
+      setLimits: (min, max) => j.setLimits(AX, min, max),
+      configureMotorModel: (m) => j.configureMotorModel(AX, m),
+      configureMotorPosition: (t, k, d) => j.configureMotorPosition(AX, t, k, d),
+      setMotorMaxForce: (f) => j.setMotorMaxForce(AX, f),
+    };
+  }
+  return {
+    setLimits: (min, max) => j.setLimits(min, max),
+    configureMotorModel: (m) => j.configureMotorModel(m),
+    configureMotorPosition: (t, k, d) => j.configureMotorPosition(t, k, d),
+    setMotorMaxForce: (f) => j.setMotorMaxForce(f),
+  };
 }
 
 const X_AXIS = { x: 1, y: 0, z: 0 };
@@ -77,6 +111,19 @@ export class Rig {
   private amp = 0;
   private q = new THREE.Quaternion();
   private v = new THREE.Vector3();
+  private motorWarned = false;
+
+  private motor(j: MotorJoint, target: number, k: number, d: number) {
+    try {
+      j.configureMotorPosition(target, k, d);
+    } catch (e) {
+      // a degenerate joint must never take the game loop down with it
+      if (!this.motorWarned) {
+        this.motorWarned = true;
+        console.error("[rig] joint motor failed:", e);
+      }
+    }
+  }
 
   build(
     root: RAPIER.RigidBody,
@@ -167,12 +214,14 @@ export class Rig {
           .setCollisionGroups(LIMB_GROUPS),
         body
       );
-      const joint = world.createImpulseJoint(
-        RAPIER.JointData.revoluteWithAxes(anchor, { x: 0, y: half, z: 0 }, X_AXIS, X_AXIS),
-        parent,
-        body,
-        true
-      ) as unknown as MotorJoint;
+      const joint = wrapJoint(
+        world.createImpulseJoint(
+          RAPIER.JointData.revoluteWithAxes(anchor, { x: 0, y: half, z: 0 }, X_AXIS, X_AXIS),
+          parent,
+          body,
+          true
+        )
+      );
       joint.setLimits(limits[0], limits[1]);
       joint.configureMotorModel(RAPIER.MotorModel.AccelerationBased);
       joint.setMotorMaxForce(150);
@@ -190,8 +239,8 @@ export class Rig {
     };
 
     const foot = (g: THREE.Group) => {
-      const f = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.09, 0.26), std(look.shoe, 0.8));
-      f.position.set(0, -0.15, -0.055);
+      const f = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.1, 0.28), std(look.shoe, 0.8));
+      f.position.set(0, -0.21, -0.055);
       f.castShadow = true;
       g.add(f);
     };
@@ -201,19 +250,23 @@ export class Rig {
       g.add(h);
     };
 
-    /* legs: hip → thigh → knee → shin(+foot collider) */
-    const thighL = mkLimb(root, { x: 0.16, y: -0.02, z: 0 }, 0.215, 0.125, 1.3, look.pants, [-0.85, 1.15]);
-    const thighR = mkLimb(root, { x: -0.16, y: -0.02, z: 0 }, 0.215, 0.125, 1.3, look.pants, [-0.85, 1.15]);
-    const shinL = mkLimb(thighL.body, { x: 0, y: -0.215, z: 0 }, 0.185, 0.1, 0.9, look.pants, [-2.35, -0.045], foot);
-    const shinR = mkLimb(thighR.body, { x: 0, y: -0.215, z: 0 }, 0.185, 0.1, 0.9, look.pants, [-2.35, -0.045], foot);
+    /* legs: hip → thigh → knee → shin(+foot collider).
+     * The root capsule's bottom is 0.81 below its center and hips sit at
+     * −0.02, so thigh 0.40 + shin 0.42 ≈ 0.82 plants the feet on the ground
+     * with a naturally slightly-bent knee. */
+    const thighL = mkLimb(root, { x: 0.16, y: -0.02, z: 0 }, 0.2, 0.13, 1.4, look.pants, [-0.85, 1.15]);
+    const thighR = mkLimb(root, { x: -0.16, y: -0.02, z: 0 }, 0.2, 0.13, 1.4, look.pants, [-0.85, 1.15]);
+    const shinL = mkLimb(thighL.body, { x: 0, y: -0.2, z: 0 }, 0.16, 0.1, 1.0, look.pants, [-2.35, -0.045], foot);
+    const shinR = mkLimb(thighR.body, { x: 0, y: -0.2, z: 0 }, 0.16, 0.1, 1.0, look.pants, [-2.35, -0.045], foot);
 
     // feet get their own little collider so they physically plant on the ground
+    // (its bottom is flush with the shin capsule's rounded end)
     for (const shin of [shinL, shinR]) {
       world.createCollider(
-        RAPIER.ColliderDesc.cuboid(0.065, 0.045, 0.13)
-          .setTranslation(0, -0.15, -0.055)
-          .setDensity(0.35 / boxVolume(0.065, 0.045, 0.13))
-          .setFriction(0.9)
+        RAPIER.ColliderDesc.cuboid(0.065, 0.05, 0.14)
+          .setTranslation(0, -0.21, -0.055)
+          .setDensity(0.4 / boxVolume(0.065, 0.05, 0.14))
+          .setFriction(0.95)
           .setRestitution(0)
           .setCollisionGroups(LIMB_GROUPS),
         shin.body
@@ -261,14 +314,14 @@ export class Rig {
 
     const K = 150;
     const D = 19;
-    this.jHipL.configureMotorPosition(hipL, K, D);
-    this.jHipR.configureMotorPosition(hipR, K, D);
-    this.jKneeL.configureMotorPosition(kneeL, K, D);
-    this.jKneeR.configureMotorPosition(kneeR, K, D);
-    this.jShL.configureMotorPosition(shL, K, D);
-    this.jShR.configureMotorPosition(shR, K, D);
-    this.jElL.configureMotorPosition(elL, K, D);
-    this.jElR.configureMotorPosition(elR, K, D);
+    this.motor(this.jHipL, hipL, K, D);
+    this.motor(this.jHipR, hipR, K, D);
+    this.motor(this.jKneeL, kneeL, K, D);
+    this.motor(this.jKneeR, kneeR, K, D);
+    this.motor(this.jShL, shL, K, D);
+    this.motor(this.jShR, shR, K, D);
+    this.motor(this.jElL, elL, K, D);
+    this.motor(this.jElR, elR, K, D);
   }
 
   /** Copy physics transforms from the bodies onto the meshes. */

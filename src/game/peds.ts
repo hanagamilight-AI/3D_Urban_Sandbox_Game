@@ -64,7 +64,7 @@ export class PedManager {
       const body = this.world.createRigidBody(
         RAPIER.RigidBodyDesc.dynamic()
           .setTranslation(pos.x, 2.4, pos.z)
-          .enabledRotations(false, false, false)
+          .setAngularDamping(4)
           .setLinearDamping(0.4)
           .setCanSleep(false)
       );
@@ -163,7 +163,9 @@ export class PedManager {
         }
       }
 
-      // the physics body carries the yaw so limb hinge axes track facing
+      // the physics body carries the yaw so limb hinge axes track facing;
+      // kill accumulated spin each frame so they stay upright on their feet
+      p.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
       this.quat.setFromAxisAngle(this.Y_AXIS, p.yaw);
       p.body.setRotation({ x: this.quat.x, y: this.quat.y, z: this.quat.z, w: this.quat.w }, true);
 

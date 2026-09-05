@@ -57,6 +57,7 @@ export class Game {
   private promptShown = false;
   private lastClock = "";
   private proj = new THREE.Vector3();
+  private simWarned = false;
   readonly touch: boolean;
   private tMove = { x: 0, z: 0 };
   private tLook = { x: 0, y: 0 };
@@ -274,40 +275,15 @@ export class Game {
     this.lastT = now;
 
     if (this.locked && this.ready) {
-      this.simT += dt;
-      this.acc = Math.min(this.acc + dt, STEP * 5);
-      let iters = 0;
-      while (this.acc >= STEP && iters < 5) {
-        this.world.step();
-        this.acc -= STEP;
-        iters++;
+      try {
+        this.simulate(dt);
+      } catch (e) {
+        // physics must never freeze the game — log once, keep rendering
+        if (!this.simWarned) {
+          this.simWarned = true;
+          console.error("[sunnyside] simulation error (recovered):", e);
+        }
       }
-
-      if (this.touch) {
-        this.player.rotate(this.tLook.x, this.tLook.y);
-        this.tLook.x = 0;
-        this.tLook.y = 0;
-      }
-      const k = this.keys;
-      const cl = (v: number) => Math.max(-1, Math.min(1, v));
-      const moveZ = cl((k.has("KeyW") || k.has("ArrowUp") ? 1 : 0) - (k.has("KeyS") || k.has("ArrowDown") ? 1 : 0) + this.tMove.z);
-      const moveX = cl((k.has("KeyD") || k.has("ArrowRight") ? 1 : 0) - (k.has("KeyA") || k.has("ArrowLeft") ? 1 : 0) + this.tMove.x);
-      this.player.update(dt, {
-        moveX,
-        moveZ,
-        sprint: k.has("ShiftLeft") || k.has("ShiftRight") || this.tSprint,
-      });
-      this.peds.update(dt, this.player.pos);
-      this.city.animate(this.simT, dt);
-
-      // fell off the world? drop them back at the corner
-      if (this.player.pos.y < -6) {
-        this.player.body.setNextKinematicTranslation({ x: SPAWN.x, y: SPAWN.y + 1, z: SPAWN.z });
-      }
-
-      this.updateZones(dt);
-      this.updateInteraction();
-      this.updateClock(dt);
     }
 
     if (this.ready) {
@@ -317,6 +293,43 @@ export class Game {
       this.renderer.render(this.scene, this.camera);
     }
   };
+
+  private simulate(dt: number) {
+    this.simT += dt;
+    this.acc = Math.min(this.acc + dt, STEP * 5);
+    let iters = 0;
+    while (this.acc >= STEP && iters < 5) {
+      this.world.step();
+      this.acc -= STEP;
+      iters++;
+    }
+
+    if (this.touch) {
+      this.player.rotate(this.tLook.x, this.tLook.y);
+      this.tLook.x = 0;
+      this.tLook.y = 0;
+    }
+    const k = this.keys;
+    const cl = (v: number) => Math.max(-1, Math.min(1, v));
+    const moveZ = cl((k.has("KeyW") || k.has("ArrowUp") ? 1 : 0) - (k.has("KeyS") || k.has("ArrowDown") ? 1 : 0) + this.tMove.z);
+    const moveX = cl((k.has("KeyD") || k.has("ArrowRight") ? 1 : 0) - (k.has("KeyA") || k.has("ArrowLeft") ? 1 : 0) + this.tMove.x);
+    this.player.update(dt, {
+      moveX,
+      moveZ,
+      sprint: k.has("ShiftLeft") || k.has("ShiftRight") || this.tSprint,
+    });
+    this.peds.update(dt, this.player.pos);
+    this.city.animate(this.simT, dt);
+
+    // fell off the world? drop them back at the corner
+    if (this.player.pos.y < -6) {
+      this.player.body.setNextKinematicTranslation({ x: SPAWN.x, y: SPAWN.y + 1, z: SPAWN.z });
+    }
+
+    this.updateZones(dt);
+    this.updateInteraction();
+    this.updateClock(dt);
+  }
 
   private updateZones(dt: number) {
     this.zoneTimer -= dt;
