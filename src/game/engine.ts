@@ -57,6 +57,10 @@ export class Game {
   private promptShown = false;
   private lastClock = "";
   private proj = new THREE.Vector3();
+  readonly touch: boolean;
+  private tMove = { x: 0, z: 0 };
+  private tLook = { x: 0, y: 0 };
+  private tSprint = false;
 
   constructor(
     private container: HTMLElement,
@@ -71,6 +75,8 @@ export class Game {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
     container.appendChild(this.renderer.domElement);
+    this.renderer.domElement.style.touchAction = "none";
+    this.touch = window.matchMedia("(pointer: coarse)").matches;
 
     this.camera = new THREE.PerspectiveCamera(62, container.clientWidth / container.clientHeight, 0.1, 500);
     this.scene.background = new THREE.Color("#a9d9ec");
@@ -96,6 +102,7 @@ export class Game {
     document.addEventListener("keyup", this.onKeyUp);
     document.addEventListener("mousemove", this.onMouseMove);
     document.addEventListener("pointerlockchange", this.onLockChanged);
+    document.addEventListener("visibilitychange", this.onVis);
   }
 
   async start() {
@@ -127,7 +134,54 @@ export class Game {
 
   lock() {
     sfx.unlock();
+    if (this.touch) {
+      this.setPlaying(true);
+      return;
+    }
     this.renderer.domElement.requestPointerLock();
+  }
+
+  pause() {
+    if (this.touch && this.locked) this.setPlaying(false);
+  }
+
+  private setPlaying(on: boolean) {
+    if (on === this.locked) return;
+    this.locked = on;
+    if (on) {
+      this.acc = 0;
+      this.lastT = performance.now();
+      this.keys.clear();
+    } else {
+      this.cb.onBubblePos(0, 0, false);
+      this.bubble = null;
+      this.setPrompt(false);
+      this.tMove.x = 0;
+      this.tMove.z = 0;
+      this.tLook.x = 0;
+      this.tLook.y = 0;
+      this.tSprint = false;
+    }
+    this.cb.onLockChange(on);
+  }
+
+  /* -------- touch input API -------- */
+  setMove(x: number, z: number) {
+    this.tMove.x = x;
+    this.tMove.z = z;
+  }
+  look(dx: number, dy: number) {
+    this.tLook.x += dx;
+    this.tLook.y += dy;
+  }
+  setSprint(on: boolean) {
+    this.tSprint = on;
+  }
+  jump() {
+    if (this.locked && this.ready) this.player.queueJump();
+  }
+  talk() {
+    if (this.locked && this.ready) this.interact();
   }
 
   dispose() {
@@ -138,6 +192,7 @@ export class Game {
     document.removeEventListener("keyup", this.onKeyUp);
     document.removeEventListener("mousemove", this.onMouseMove);
     document.removeEventListener("pointerlockchange", this.onLockChanged);
+    document.removeEventListener("visibilitychange", this.onVis);
     this.renderer.dispose();
     if (this.renderer.domElement.parentElement === this.container)
       this.container.removeChild(this.renderer.domElement);
@@ -171,17 +226,12 @@ export class Game {
   };
 
   private onLockChanged = () => {
-    this.locked = document.pointerLockElement === this.renderer.domElement;
-    if (this.locked) {
-      this.acc = 0;
-      this.lastT = performance.now();
-      this.keys.clear();
-    } else {
-      this.cb.onBubblePos(0, 0, false);
-      this.bubble = null;
-      this.setPrompt(false);
-    }
-    this.cb.onLockChange(this.locked);
+    if (this.touch) return;
+    this.setPlaying(document.pointerLockElement === this.renderer.domElement);
+  };
+
+  private onVis = () => {
+    if (document.hidden && this.touch && this.locked) this.setPlaying(false);
   };
 
   /* ---------------- interaction ---------------- */
@@ -233,13 +283,19 @@ export class Game {
         iters++;
       }
 
+      if (this.touch) {
+        this.player.rotate(this.tLook.x, this.tLook.y);
+        this.tLook.x = 0;
+        this.tLook.y = 0;
+      }
       const k = this.keys;
-      const moveZ = (k.has("KeyW") || k.has("ArrowUp") ? 1 : 0) - (k.has("KeyS") || k.has("ArrowDown") ? 1 : 0);
-      const moveX = (k.has("KeyD") || k.has("ArrowRight") ? 1 : 0) - (k.has("KeyA") || k.has("ArrowLeft") ? 1 : 0);
+      const cl = (v: number) => Math.max(-1, Math.min(1, v));
+      const moveZ = cl((k.has("KeyW") || k.has("ArrowUp") ? 1 : 0) - (k.has("KeyS") || k.has("ArrowDown") ? 1 : 0) + this.tMove.z);
+      const moveX = cl((k.has("KeyD") || k.has("ArrowRight") ? 1 : 0) - (k.has("KeyA") || k.has("ArrowLeft") ? 1 : 0) + this.tMove.x);
       this.player.update(dt, {
         moveX,
         moveZ,
-        sprint: k.has("ShiftLeft") || k.has("ShiftRight"),
+        sprint: k.has("ShiftLeft") || k.has("ShiftRight") || this.tSprint,
       });
       this.peds.update(dt, this.player.pos);
       this.city.animate(this.simT, dt);
