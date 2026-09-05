@@ -203,7 +203,7 @@ export class Player {
     (this.muzzle.material as THREE.MeshBasicMaterial).opacity = this.muzzleT / 0.07;
     this.muzzle.scale.setScalar(0.8 + Math.random() * 0.5);
     this.recoil = Math.max(0, this.recoil - dt * 6);
-    this.rig.gunAnchor.position.z = -0.28 + this.recoil * 0.1;
+    this.rig.gunAnchor.position.z = -0.18 + this.recoil * 0.1;
     this.rig.gunAnchor.rotation.x = this.recoil * 0.35;
   }
 

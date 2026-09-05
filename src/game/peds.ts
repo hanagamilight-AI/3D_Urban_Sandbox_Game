@@ -110,11 +110,9 @@ export class PedManager {
 
   private register(ped: Ped) {
     this.bodyMap.set(ped.body.handle, ped);
-    for (const b of ped.rig.limbBodies) this.bodyMap.set(b.handle, ped);
   }
   private unregister(ped: Ped) {
     this.bodyMap.delete(ped.body.handle);
-    for (const b of ped.rig.limbBodies) this.bodyMap.delete(b.handle);
   }
 
   /** Spawn wandering civilians. */
